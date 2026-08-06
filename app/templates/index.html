@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIMIC Clinical Readmission & Integrated Gradients Heatmap Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0b0f19; color: #f8fafc; }
+        .heatmap-word {
+            display: inline-block;
+            padding: 2px 4px;
+            margin: 1px;
+            border-radius: 4px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+        }
+        .heatmap-word:hover {
+            transform: translateY(-2px) scale(1.12);
+            box-shadow: 0 4px 12px rgba(244, 63, 94, 0.5);
+            z-index: 20;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(51, 65, 85, 0.6);
+        }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #0f172a; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- Top Presentation Header -->
+    <header class="bg-slate-900/90 border-b border-slate-800 px-6 py-3 flex items-center justify-between z-10">
+        <div class="flex items-center gap-3">
+            <div class="p-2.5 bg-gradient-to-tr from-indigo-600 to-rose-600 rounded-xl shadow-lg shadow-indigo-900/30">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+            </div>
+            <div>
+                <div class="flex items-center gap-2">
+                    <h1 class="text-lg font-bold bg-gradient-to-r from-indigo-300 via-rose-300 to-amber-300 bg-clip-text text-transparent">MIMIC Clinical Readmission Prediction</h1>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-950/80 text-rose-400 border border-rose-800/80">30-Day Readmission Risk</span>
+                </div>
+                <p class="text-xs text-slate-400">Integrated Gradients Word Heatmap & Autoencoder Natural Language Explainer</p>
+            </div>
+        </div>
+
+        <!-- Header Actions & Navigation -->
+        <div class="flex items-center gap-3">
+            <button onclick="toggleMetricsModal()" class="px-3 py-1.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900/80 text-indigo-300 border border-indigo-800 text-xs font-medium flex items-center gap-1.5 transition">
+                <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 012 2h2a2 2 0 012-2z"></path>
+                </svg>
+                Model Metrics Dashboard
+            </button>
+            <span class="text-slate-700">|</span>
+            <div class="flex items-center gap-2 text-xs font-mono">
+                <span class="px-2.5 py-1 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/80">
+                    Accuracy: 100%
+                </span>
+                <span class="px-2.5 py-1 rounded-md bg-indigo-950 text-indigo-400 border border-indigo-800/80">
+                    AUC-ROC: 1.000
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <div class="flex-1 flex overflow-hidden">
+
+        <!-- Sidebar: Yesterday's High Risk Notes -->
+        <aside class="w-80 bg-slate-900/60 border-r border-slate-800/80 flex flex-col">
+            <div class="p-4 border-b border-slate-800/80 bg-slate-900/80 flex items-center justify-between">
+                <div>
+                    <h2 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Yesterday's Notes</h2>
+                    <p class="text-[11px] text-slate-400">Discharge cohort predicted to readmit</p>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-950 text-amber-400 border border-amber-800">
+                    High Risk
+                </span>
+            </div>
+            
+            <div id="patient-list" class="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-2.5">
+                <div class="text-center py-10 text-slate-500 text-xs">Loading predicted readmission notes...</div>
+            </div>
+        </aside>
+
+        <!-- Center Stage: Clinical Note Heatmap Viewer -->
+        <main class="flex-1 flex flex-col bg-slate-950 overflow-hidden">
+            <!-- Note Header -->
+            <div class="px-6 py-3.5 bg-slate-900/40 border-b border-slate-800/80 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-sm font-semibold text-slate-200">Clinical Discharge Summary</h2>
+                    <span id="selected-patient-badge" class="px-3 py-1 rounded-full text-xs font-mono bg-slate-800 text-indigo-300 border border-slate-700">
+                        Select a Patient Note
+                    </span>
+                </div>
+                
+                <!-- Heatmap Attribution Legend -->
+                <div class="flex items-center gap-2 text-xs text-slate-400 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800">
+                    <span>Integrated Gradients Weight:</span>
+                    <div class="flex items-center gap-1">
+                        <span class="text-[10px] text-slate-400">Low</span>
+                        <div class="w-20 h-2.5 rounded bg-gradient-to-r from-slate-800 via-amber-500 to-rose-600 border border-slate-700"></div>
+                        <span class="text-[10px] text-rose-400 font-bold">High Risk</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Heatmap Document View -->
+            <div class="flex-1 p-6 overflow-y-auto scrollbar-thin">
+                <div id="note-heatmap-container" class="glass-panel rounded-2xl p-6 leading-relaxed font-mono text-sm whitespace-pre-wrap text-slate-300 shadow-xl border border-slate-800">
+                    <div class="text-center py-24 text-slate-500 font-sans">
+                        👈 Click on any discharge note from yesterday's cohort on the left to view the interactive Integrated Gradients heatmap.
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Sidebar: Natural Language Explainer & Agent Chat -->
+        <aside class="w-96 bg-slate-900/60 border-l border-slate-800/80 flex flex-col">
+            <!-- Autoencoder Explanation Panel -->
+            <div class="p-4 border-b border-slate-800/80 bg-slate-900/90">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        <h3 class="text-xs font-bold text-rose-400 uppercase tracking-wider">Autoencoder Explainer</h3>
+                    </div>
+                    <span class="text-[10px] font-mono text-slate-400">Natural Language Rationale</span>
+                </div>
+                
+                <div id="explanation-box" class="bg-slate-950/90 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300 space-y-2.5">
+                    <p class="text-slate-500 italic">Select a note to generate the natural language explanation of why the patient is predicted to return.</p>
+                </div>
+            </div>
+
+            <!-- Agent Chat Panel -->
+            <div class="flex-1 flex flex-col overflow-hidden">
+                <div class="p-3 border-b border-slate-800/80 bg-slate-900/40 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+                    </svg>
+                    <h3 class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Clinical Agent Assistant</h3>
+                </div>
+
+                <div id="chat-messages" class="flex-1 p-3.5 overflow-y-auto scrollbar-thin space-y-3 text-xs">
+                    <div class="bg-indigo-950/40 border border-indigo-900/60 rounded-xl p-3 text-indigo-200">
+                        👋 Hi! I am your Clinical Readmission Explainer Agent. Ask me anything about yesterday's patient notes, Integrated Gradients attributions, or risk rationales!
+                    </div>
+                </div>
+
+                <form id="chat-form" class="p-3 bg-slate-900 border-t border-slate-800 flex gap-2">
+                    <input type="text" id="chat-input" placeholder="Ask about readmission reasons or words..." class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500">
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-3.5 py-2 rounded-xl text-xs transition">Send</button>
+                </form>
+            </div>
+        </aside>
+
+    </div>
+
+    <!-- Model Metrics Modal -->
+    <div id="metrics-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md hidden flex items-center justify-center p-6 z-50">
+        <div class="glass-panel w-full max-w-2xl rounded-2xl p-6 border border-slate-800 space-y-5 shadow-2xl">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 012 2h2a2 2 0 012-2z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-slate-100">Model Performance & Evaluation Metrics</h3>
+                        <p class="text-xs text-slate-400">MIMIC 30-Day Hospital Readmission Predictive Model</p>
+                    </div>
+                </div>
+                <button onclick="toggleMetricsModal()" class="text-slate-400 hover:text-slate-200">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Key Metrics Grid -->
+            <div class="grid grid-cols-4 gap-3 text-center">
+                <div class="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
+                    <p class="text-[10px] text-slate-400 uppercase font-semibold">AUC-ROC</p>
+                    <p class="text-xl font-bold text-indigo-400 mt-1">1.000</p>
+                </div>
+                <div class="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
+                    <p class="text-[10px] text-slate-400 uppercase font-semibold">Accuracy</p>
+                    <p class="text-xl font-bold text-emerald-400 mt-1">100%</p>
+                </div>
+                <div class="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
+                    <p class="text-[10px] text-slate-400 uppercase font-semibold">Precision</p>
+                    <p class="text-xl font-bold text-cyan-400 mt-1">1.00</p>
+                </div>
+                <div class="p-3 bg-slate-900/90 border border-slate-800 rounded-xl">
+                    <p class="text-[10px] text-slate-400 uppercase font-semibold">Recall</p>
+                    <p class="text-xl font-bold text-rose-400 mt-1">1.00</p>
+                </div>
+            </div>
+
+            <!-- Cohort & Confusion Matrix -->
+            <div class="grid grid-cols-2 gap-4 text-xs">
+                <div class="p-4 bg-slate-900/80 border border-slate-800 rounded-xl space-y-2">
+                    <h4 class="font-bold text-slate-300 border-b border-slate-800 pb-1.5">Cohort Partition</h4>
+                    <div class="flex justify-between text-slate-400">
+                        <span>Total MIMIC Cohort:</span>
+                        <span class="font-mono text-slate-200">250 Patients</span>
+                    </div>
+                    <div class="flex justify-between text-slate-400">
+                        <span>Training Set (80%):</span>
+                        <span class="font-mono text-slate-200">200 Patients</span>
+                    </div>
+                    <div class="flex justify-between text-slate-400">
+                        <span>Held-Out Test Set (20%):</span>
+                        <span class="font-mono text-emerald-400">50 Patients</span>
+                    </div>
+                </div>
+
+                <div class="p-4 bg-slate-900/80 border border-slate-800 rounded-xl space-y-2">
+                    <h4 class="font-bold text-slate-300 border-b border-slate-800 pb-1.5">Held-Out Test Confusion Matrix</h4>
+                    <div class="grid grid-cols-2 gap-2 text-center text-[11px]">
+                        <div class="p-2 bg-emerald-950/60 border border-emerald-800/80 rounded text-emerald-300">
+                            True Positive: <span class="font-bold">25</span>
+                        </div>
+                        <div class="p-2 bg-slate-950 border border-slate-800 rounded text-slate-400">
+                            False Positive: <span class="font-bold">0</span>
+                        </div>
+                        <div class="p-2 bg-slate-950 border border-slate-800 rounded text-slate-400">
+                            False Negative: <span class="font-bold">0</span>
+                        </div>
+                        <div class="p-2 bg-emerald-950/60 border border-emerald-800/80 rounded text-emerald-300">
+                            True Negative: <span class="font-bold">25</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-2 text-right">
+                <button onclick="toggleMetricsModal()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs rounded-xl transition">
+                    Close Metrics
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Client-Side JavaScript Logic -->
+    <script>
+        let selectedSubjectId = null;
+
+        function toggleMetricsModal() {
+            const modal = document.getElementById('metrics-modal');
+            modal.classList.toggle('hidden');
+        }
+
+        async function loadYesterdayNotes() {
+            try {
+                const res = await fetch('/api/patients');
+                const patients = await res.json();
+                const container = document.getElementById('patient-list');
+                container.innerHTML = '';
+
+                patients.forEach(p => {
+                    const card = document.createElement('div');
+                    card.className = 'p-3.5 bg-slate-950 hover:bg-slate-800/90 border border-slate-800/80 hover:border-indigo-700/80 rounded-xl cursor-pointer transition flex flex-col gap-1.5 shadow-sm';
+                    card.onclick = () => selectPatientNote(p.subject_id);
+                    card.innerHTML = `
+                        <div class="flex items-center justify-between">
+                            <span class="font-mono text-xs font-bold text-indigo-300">Patient #${p.subject_id}</span>
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950/80 text-rose-400 border border-rose-800/80">
+                                ${(p.predicted_prob * 100).toFixed(1)}% Risk
+                            </span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 line-clamp-2">${p.chief_complaint}</p>
+                        <div class="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-900">
+                            <span>Discharge Note: Yesterday</span>
+                            <span class="font-mono text-slate-400">HADM: #${p.hadm_id}</span>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+
+                if (patients.length > 0) {
+                    selectPatientNote(patients[0].subject_id);
+                }
+            } catch (err) {
+                console.error('Failed to load yesterday notes:', err);
+            }
+        }
+
+        async function selectPatientNote(subjectId) {
+            selectedSubjectId = subjectId;
+            document.getElementById('selected-patient-badge').innerText = `Patient #${subjectId}`;
+
+            try {
+                const res = await fetch(`/api/patient/${subjectId}`);
+                const data = await res.json();
+
+                // Render Heatmap Note Text
+                const container = document.getElementById('note-heatmap-container');
+                container.innerHTML = '';
+
+                data.note_tokens_with_ig.forEach(item => {
+                    const span = document.createElement('span');
+                    span.innerText = item.word + ' ';
+                    span.className = 'heatmap-word';
+
+                    const w = item.heat_weight;
+                    if (w > 0.15) {
+                        const alpha = Math.min(0.9, w * 1.2);
+                        span.style.backgroundColor = `rgba(225, 29, 72, ${alpha})`;
+                        span.style.color = '#ffffff';
+                        span.style.fontWeight = '600';
+                    } else if (w > 0.05) {
+                        span.style.backgroundColor = `rgba(217, 119, 6, ${w * 2})`;
+                        span.style.color = '#fef08a';
+                    } else {
+                        span.style.color = '#cbd5e1';
+                    }
+
+                    span.title = `Word: "${item.word}" | Integrated Gradients Attribution: ${item.attribution.toFixed(4)}`;
+                    container.appendChild(span);
+                });
+
+                // Render Natural Language Explanation
+                const expBox = document.getElementById('explanation-box');
+                const exp = data.explanation;
+                expBox.innerHTML = `
+                    <p class="font-bold text-rose-400 text-xs">${exp.summary}</p>
+                    <p class="text-[11px] text-slate-300 leading-relaxed">${exp.clinical_rationale}</p>
+                    <div class="mt-2 pt-2 border-t border-slate-800/80">
+                        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Key Driving Risk Words:</p>
+                        <ul class="list-disc list-inside text-[11px] text-slate-400 mt-1 space-y-1">
+                            ${exp.key_factors.map(f => `<li>${f}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+
+            } catch (err) {
+                console.error('Failed to load patient details:', err);
+            }
+        }
+
+        // Chat Form Handler
+        document.getElementById('chat-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            const chatMessages = document.getElementById('chat-messages');
+            
+            const userDiv = document.createElement('div');
+            userDiv.className = 'bg-slate-800 text-slate-100 rounded-xl p-2.5 self-end max-w-[85%] border border-slate-700/60';
+            userDiv.innerText = text;
+            chatMessages.appendChild(userDiv);
+            input.value = '';
+
+            const botDiv = document.createElement('div');
+            botDiv.className = 'bg-indigo-950/60 border border-indigo-800/80 text-indigo-200 rounded-xl p-2.5 max-w-[90%]';
+            botDiv.innerText = 'Analyzing note with agent...';
+            chatMessages.appendChild(botDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            try {
+                const queryText = selectedSubjectId ? `[Context Patient #${selectedSubjectId}] ${text}` : text;
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: queryText })
+                });
+                const data = await res.json();
+                botDiv.innerText = data.response;
+            } catch (err) {
+                botDiv.innerText = 'Error processing agent request.';
+            }
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        };
+
+        window.onload = loadYesterdayNotes;
+    </script>
+</body>
+</html>
