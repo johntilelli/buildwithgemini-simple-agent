@@ -309,6 +309,11 @@
                 container.innerHTML = '';
 
                 data.note_tokens_with_ig.forEach(item => {
+                    // Skip '=' tokens or pure divider symbols
+                    if (!item.word || item.word.trim() === '=' || item.word.includes('===')) {
+                        return;
+                    }
+
                     const span = document.createElement('span');
                     span.innerText = item.word + ' ';
                     span.className = 'heatmap-word';

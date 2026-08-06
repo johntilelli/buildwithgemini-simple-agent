@@ -99,10 +99,7 @@ LOW_RISK_TEMPLATES = [
 ]
 
 def generate_mimic_discharge_note(template, subject_id, hadm_id, admittime, dischtime):
-    note_text = f"""
-================================================================================
-MIMIC-III / MIMIC-IV DISCHARGE SUMMARY
-================================================================================
+    note_text = f"""MIMIC-III / MIMIC-IV DISCHARGE SUMMARY
 PATIENT ID: {subject_id}
 ADMISSION ID: {hadm_id}
 ADMISSION DATE: {admittime.strftime('%Y-%m-%d %H:%M')}
@@ -122,9 +119,7 @@ DISCHARGE DIAGNOSES:
 {template['diagnoses']}
 
 DISCHARGE INSTRUCTIONS & FOLLOW-UP:
-{template['instructions']}
-================================================================================
-""".strip()
+{template['instructions']}""".strip()
     return note_text
 
 
