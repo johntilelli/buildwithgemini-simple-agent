@@ -131,14 +131,16 @@ def build_dataset(num_samples=250):
         subject_id = 10000 + i
         hadm_id = 200000 + i
         
-        # 50% high risk, 50% low risk
+        # Probabilistic clinical label noise (reflecting real-world EHR noise)
         is_high_risk = (i % 2 == 1)
         if is_high_risk:
             template = random.choice(HIGH_RISK_TEMPLATES)
-            readmitted = 1
+            # 80% readmitted, 20% successful discharge management
+            readmitted = 1 if random.random() < 0.80 else 0
         else:
             template = random.choice(LOW_RISK_TEMPLATES)
-            readmitted = 0
+            # 15% unexpected complication/readmission, 85% no readmission
+            readmitted = 1 if random.random() < 0.15 else 0
             
         days_offset = random.randint(1, 180)
         admittime = base_date + datetime.timedelta(days=days_offset, hours=random.randint(0, 12))
