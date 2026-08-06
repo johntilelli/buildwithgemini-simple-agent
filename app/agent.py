@@ -7,12 +7,20 @@ from google.genai import types
 
 MODEL = "gemini-3.6-flash"
 
-DATA_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "test_predictions_explained.json")
-
 def _load_predictions_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            return json.load(f)
+    candidate_paths = [
+        os.path.join(os.path.dirname(__file__), "data", "test_predictions_explained.json"),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "test_predictions_explained.json"),
+        "data/test_predictions_explained.json",
+        "test_predictions_explained.json"
+    ]
+    for path in candidate_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as f:
+                    return json.load(f)
+            except Exception:
+                pass
     return []
 
 def get_high_risk_patients(min_probability: float = 0.5) -> str:
